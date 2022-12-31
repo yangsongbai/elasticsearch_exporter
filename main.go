@@ -122,6 +122,10 @@ func main() {
 		awsRegion = kingpin.Flag("aws.region",
 			"Region for AWS elasticsearch").
 			Default("").String()
+		esClusterStats = kingpin.Flag("es.cluster",
+			"es cluster stats metrics should be exposed.").
+			Default("true").Envar("ES_CLUSTER").Bool()
+
 	)
 
 	kingpin.Version(version.Print(name))
@@ -178,6 +182,12 @@ func main() {
 		}
 	}
 
+	if *esClusterStats {
+		prometheus.MustRegister(collector.NewClusterStats(logger, httpClient, esURL))
+	}
+
+	//索引状态
+	prometheus.MustRegister(collector.NewClusterState(logger, httpClient, esURL))
 	// version metric
 	prometheus.MustRegister(version.NewCollector(name))
 

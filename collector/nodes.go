@@ -86,6 +86,7 @@ func createRoleMetric(role string) *nodeMetric {
 var (
 	defaultNodeLabels               = []string{"cluster", "host", "name", "es_master_node", "es_data_node", "es_ingest_node", "es_client_node"}
 	defaultRoleLabels               = []string{"cluster", "host", "name"}
+	defaultNodeStatusLabels         = []string{"es_cluster", "name", "node_status"}
 	defaultThreadPoolLabels         = append(defaultNodeLabels, "type")
 	defaultBreakerLabels            = append(defaultNodeLabels, "breaker")
 	defaultFilesystemDataLabels     = append(defaultNodeLabels, "mount", "path")
@@ -120,6 +121,13 @@ var (
 		return append(defaultNodeLabelValues(cluster, node), "miss")
 	}
 )
+
+type nodeStatusMetric struct {
+	Type   prometheus.ValueType
+	Desc   *prometheus.Desc
+	Value  func(status float64) float64
+	Labels func(cluster string, node string, status string) []string
+}
 
 type nodeMetric struct {
 	Type   prometheus.ValueType
@@ -173,7 +181,7 @@ type Nodes struct {
 
 	up                              prometheus.Gauge
 	totalScrapes, jsonParseFailures prometheus.Counter
-
+	nodeStatusMetrics         []*nodeStatusMetric
 	nodeMetrics               []*nodeMetric
 	gcCollectionMetrics       []*gcCollectionMetric
 	breakerMetrics            []*breakerMetric
@@ -203,7 +211,22 @@ func NewNodes(logger log.Logger, client *http.Client, url *url.URL, all bool, no
 			Name: prometheus.BuildFQName(namespace, "node_stats", "json_parse_failures"),
 			Help: "Number of errors while parsing JSON.",
 		}),
-
+		nodeStatusMetrics: []*nodeStatusMetric{
+			{
+				Type: prometheus.GaugeValue,
+				Desc: prometheus.NewDesc(
+					prometheus.BuildFQName(namespace, "cluster_node", "status"),
+					"node Status",
+					defaultNodeStatusLabels, nil,
+				),
+				Value: func(status float64) float64 {
+					return status
+				},
+				Labels: func(cluster string, name string, status string) []string {
+					return []string{cluster, name, status}
+				},
+			},
+		},
 		nodeMetrics: []*nodeMetric{
 			{
 				Type: prometheus.GaugeValue,
@@ -1948,4 +1971,63 @@ func (c *Nodes) Collect(ch chan<- prometheus.Metric) {
 		}
 
 	}
+	var downNode = make(map[string]float64, 0)
+	current := make(map[string]float64, 0)
+	for _, node := range nodeStatsResp.Nodes {
+		current[node.Name] = 0
+	}
+
+	//与上次的topo比较，判断是否有离线的
+	for name, _ := range lastNodeStatsResponse {
+		if _, ok := current[name]; !ok {
+			downNode[name] = 1
+		}
+	}
+	ch = nodeStatus(ch, downNode, c, nodeStatsResp)
+	ch = nodeStatus(ch, current, c, nodeStatsResp)
+	lastNodeStatsResponse = current
+}
+var lastNodeStatsResponse map[string]float64
+const (
+	UP   = "up"
+	DOWN = "down"
+)
+func nodeStatus(ch chan<- prometheus.Metric, nodes map[string]float64, c *Nodes, nodeStatsResp nodeStatsResponse) chan<- prometheus.Metric {
+	for name, status := range nodes {
+		nodeStatus := UP
+		if status == 1 {
+			nodeStatus = DOWN
+		}
+		for _, metric := range c.nodeStatusMetrics {
+			ch <- prometheus.MustNewConstMetric(
+				metric.Desc,
+				metric.Type,
+				metric.Value(status),
+				metric.Labels(nodeStatsResp.ClusterName, name, nodeStatus)...,
+			)
+		}
+	}
+	return ch
+}
+
+/**
+diff last 和 current topology
+*/
+func topologyChanged(last map[string]float64, current map[string]float64) bool {
+	if len(last) <= 0 || len(current) <= 0 {
+		return true
+	}
+
+	for name, _ := range current {
+		if _, ok := last[name]; !ok {
+			return true
+		}
+	}
+
+	for name, _ := range last {
+		if _, ok := current[name]; !ok {
+			return true
+		}
+	}
+	return false
 }
