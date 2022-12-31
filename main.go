@@ -125,6 +125,13 @@ func main() {
 		esClusterStats = kingpin.Flag("es.cluster",
 			"es cluster stats metrics should be exposed.").
 			Default("true").Envar("ES_CLUSTER").Bool()
+		esIndices = kingpin.Flag("es.indices.indices",
+			" stats for specified indices in the cluster.").
+			Default("").Envar("ES_INDICES_INDICES").String()
+		esExportIndicesMetrics = kingpin.Flag("es.indices.metric",
+			"Export stats metrics(indexing,search,get,docs,store,merge,refresh,flush,warmer,query_cache,fielddata,completion,segments,translog,request_cache,recovery)"+
+				" for indices in the cluster.").
+			Default("indexing,search,get").Envar("ES_INDICES_METRICS").String()
 
 	)
 
@@ -213,7 +220,7 @@ func main() {
 
 	if *esExportIndices || *esExportShards {
 		prometheus.MustRegister(collector.NewShards(logger, httpClient, esURL))
-		iC := collector.NewIndices(logger, httpClient, esURL, *esExportShards, *esExportIndexAliases)
+		iC := collector.NewIndices(logger, httpClient, esURL, *esExportShards, *esExportIndexAliases, *esIndices, *esExportIndicesMetrics)
 		prometheus.MustRegister(iC)
 		if registerErr := clusterInfoRetriever.RegisterConsumer(iC); registerErr != nil {
 			_ = level.Error(logger).Log("msg", "failed to register indices collector in cluster info")

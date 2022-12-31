@@ -26,8 +26,45 @@ import (
 	"path"
 	"sort"
 	"strconv"
+	"strings"
+)
+const (
+	INDICES_STATS_INDEXING      = "indexing"
+	INDICES_STATS_SEARCH        = "search"
+	INDICES_STATS_GET           = "get"
+	INDICES_STATS_DOCS          = "docs"
+	INDICES_STATS_STORE         = "store"
+	INDICES_STATS_MERGE         = "merge"
+	INDICES_STATS_REFRESH       = "refresh"
+	INDICES_STATS_FLUSH         = "flush"
+	INDICES_STATS_WARMER        = "warmer"
+	INDICES_STATS_QUERY_CACHE   = "query_cache"
+	INDICES_STATS_FIELDDATA     = "fielddata"
+	INDICES_STATS_COMPLETION    = "completion"
+	INDICES_STATS_SEGMENTS      = "segments"
+	INDICES_STATS_TRANSLOG      = "translog"
+	INDICES_STATS_REQUEST_CACHE = "request_cache"
+	INDICES_STATS_RECOVERY      = "recovery"
 )
 
+var statsMetricsMap = map[string]int{
+	INDICES_STATS_INDEXING:      1,
+	INDICES_STATS_SEARCH:        1,
+	INDICES_STATS_GET:           1,
+	INDICES_STATS_DOCS:          1,
+	INDICES_STATS_STORE:         1,
+	INDICES_STATS_MERGE:         1,
+	INDICES_STATS_REFRESH:       1,
+	INDICES_STATS_FLUSH:         1,
+	INDICES_STATS_WARMER:        1,
+	INDICES_STATS_QUERY_CACHE:   1,
+	INDICES_STATS_FIELDDATA:     1,
+	INDICES_STATS_COMPLETION:    1,
+	INDICES_STATS_SEGMENTS:      1,
+	INDICES_STATS_REQUEST_CACHE: 1,
+	INDICES_STATS_RECOVERY:      1,
+	INDICES_STATS_TRANSLOG:      1,
+}
 type labels struct {
 	keys   func(...string) []string
 	values func(*clusterinfo.Response, ...string) []string
@@ -71,11 +108,37 @@ type Indices struct {
 	indexMetrics []*indexMetric
 	shardMetrics []*shardMetric
 	aliasMetrics []*aliasMetric
+	statsMetrics []string
+	esIndices    []string
 }
 
 // NewIndices defines Indices Prometheus metrics
-func NewIndices(logger log.Logger, client *http.Client, url *url.URL, shards bool, includeAliases bool) *Indices {
-
+func NewIndices(logger log.Logger, client *http.Client, url *url.URL, shards bool, includeAliases bool, metrics string, esIndices string) *Indices {
+	var all = true
+	spIndices := make([]string, 0)
+	statsMetric := make([]string, 0)
+	spEsIndices := strings.Split(esIndices, ",")
+	if len(spEsIndices) > 0 && esIndices != "" {
+		for _, index := range spEsIndices {
+			spIndices = append(spIndices, strings.Trim(index, " "))
+		}
+	}
+	statsMetricArray := strings.Split(metrics, ",")
+	indicesStatsMetricsMap := make(map[string]int, 0)
+	if len(statsMetricArray) > 0 && metrics != "" {
+		all = false
+		for _, metric := range statsMetricArray {
+			indicesStatsMetricsMap[metric] = 1
+			t := strings.Trim(metric, " ")
+			if _, ok := statsMetricsMap[t]; ok {
+				statsMetric = append(statsMetric, t)
+			}
+		}
+	} else {
+		indicesStatsMetricsMap["_all"] = 1
+		//statsMetric = append(statsMetric,"_all")
+		all = true
+	}
 	indexLabels := labels{
 		keys: func(...string) []string {
 			return []string{"index", "cluster"}
@@ -103,7 +166,8 @@ func NewIndices(logger log.Logger, client *http.Client, url *url.URL, shards boo
 			return append(s, "unknown_cluster")
 		},
 	}
-
+	all = all
+	//indexMetrics := make([]*indexMetric, 0)
 	aliasLabels := labels{
 		keys: func(...string) []string {
 			return []string{"index", "alias", "cluster"}
@@ -119,6 +183,8 @@ func NewIndices(logger log.Logger, client *http.Client, url *url.URL, shards boo
 	}
 
 	indices := &Indices{
+		esIndices:     spIndices,
+		statsMetrics:  statsMetric,
 		logger:        logger,
 		client:        client,
 		url:           url,
@@ -1102,7 +1168,17 @@ func (i *Indices) fetchAndDecodeIndexStats() (indexStatsResponse, error) {
 	var isr indexStatsResponse
 
 	u := *i.url
-	u.Path = path.Join(u.Path, "/_all/_stats")
+	url := "/_stats"
+	if len(i.esIndices) > 0 {
+		url = "/" + strings.Join(i.esIndices, ",") + url
+	} else {
+		url = "/_all/_stats"
+	}
+	if len(i.statsMetrics) > 0 {
+		url += "/" + strings.Join(i.statsMetrics, ",")
+	}
+//	u.Path = path.Join(u.Path, "/_all/_stats")
+	u.Path = path.Join(u.Path, url)
 	if i.shards {
 		u.RawQuery = "ignore_unavailable=true&level=shards"
 	} else {
