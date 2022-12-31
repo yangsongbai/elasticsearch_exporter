@@ -22,3 +22,7 @@ tarball:
         - examples/grafana/dashboard.json
         - examples/kubernetes/deployment.yml
         - examples/prometheus/elasticsearch.rules
+crossbuild:
+    platforms:
+        - linux/amd64
+        - linux/arm64

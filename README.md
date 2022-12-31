@@ -296,3 +296,6 @@ Pull Requests for any proposed changes.
 
 Please note that we will not merge any changes that encourage insecure
 behaviour. If in doubt please open an Issue first to discuss your proposal.
+
+## 构建二进制的命令
+make common-crossbuild
